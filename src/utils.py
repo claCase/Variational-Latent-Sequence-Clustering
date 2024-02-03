@@ -1,4 +1,3 @@
-# %%
 import numpy as np
 import tensorflow as tf
 import matplotlib.pyplot as plt
@@ -9,6 +8,9 @@ from tensorflow_probability.python.distributions import (
     Mixture as mix,
     Normal as nm,
 )
+
+def scale(scale):
+    return 1e-3 + tf.math.softplus(0.05 * scale)
 
 
 def generate_trajectories(
@@ -42,6 +44,6 @@ def generate_trajectories(
     for t in range(length):
         x_prime = distr.sample(samples)
         x = x + tf.squeeze(x_prime) * clusters_beta[None, ...] * dt
-        ta.write(t, x)
+        ta = ta.write(t, x)
     trajectories = ta.stack() + initial_samples
     return trajectories

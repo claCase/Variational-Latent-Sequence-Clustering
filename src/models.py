@@ -1,4 +1,4 @@
-# %%
+#  %%
 import tensorflow as tf
 from keras import models
 import numpy as np
@@ -10,7 +10,9 @@ from tensorflow_probability.python.distributions import (
     kl_divergence,
 )
 import layers 
+from importlib import reload 
 
+reload(layers)
 
 class VariationalMixtureRNN(models.Model):
     """_summary_
@@ -32,7 +34,7 @@ class VariationalMixtureRNN(models.Model):
         2) Q(z,y|x) = q(z_g|x,y)q(y|x) Π q(z_d|x, h) where
             q(z_g|x,y) is a global latent vector assignment given the input sequence and cluster assignment
             q(y|x) is a cluster classifier given the input sequence
-            q(z_d|x, h) is a latent vector inference distribution given the latent determinitc state and input sequence
+            q(z_d|x, h) is a latent vector inference distribution givens the latent determinitc state and input sequence
 
 
     Dimension Description:
@@ -59,8 +61,8 @@ class VariationalMixtureRNN(models.Model):
         output_units,
         hidden_units=15,
         dropout_rate=0.1,
-        activation="relu",
-        recurrent_activation="relu",
+        activation="tanh",
+        recurrent_activation="tanh",
         clusters=5,
         rnn_type="gru",
         **kwargs
@@ -91,6 +93,15 @@ class VariationalMixtureRNN(models.Model):
             recurrent_activation=recurrent_activation,
             clusters=clusters,
         )
+
+    def build(self, input_shape):
+        super().build(input_shape=input_shape)
+
+
+    @staticmethod
+    def scale(scale):
+        return 1e-3 + tf.math.softplus(0.05 * scale)
+
 
     def kl_z(self, Q, P):
         """
@@ -144,7 +155,9 @@ class VariationalMixtureRNN(models.Model):
             h_states,
         ), (y_x_sample, zg_sample, zd_x_h_sample, y_x_param, zg_param, zd_x_h_param)
 
+
     def train_step(self, data):
+        print(tf.shape(data), data.get_shape())
         x = data
         with tf.GradientTape() as tape:
             (
@@ -164,7 +177,7 @@ class VariationalMixtureRNN(models.Model):
                 Q_zg_param,
                 Q_zd_x_h_param,
             ) = self.call(
-                x
+                x, training=True
             )
 
             # E[p(x|z_g, z_d, h_d)] = log-likelihood
@@ -194,6 +207,6 @@ class VariationalMixtureRNN(models.Model):
 
 
 if __name__ == "__main__":
-    i = np.random.normal(size=(100, 50, 15))
+    '''i = np.random.normal(size=(100, 50, 15))
     vrnn = VariationalMixtureRNN(15, 10)
-    o = vrnn(i)
+    o = vrnn(i)'''

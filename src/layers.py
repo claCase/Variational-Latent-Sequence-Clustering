@@ -89,7 +89,7 @@ class VariationalRecurrenceCell(
         )
         return tf.squeeze(distr.sample(1), axis=0)
 
-    @tf.function
+    #@tf.function
     def call(self, inputs, states, training):
         h_prime, _ = self.cell(inputs, states, training)
         z_prime = self.z_encoder(h_prime)
@@ -147,33 +147,34 @@ class GenerativeVariationalMixture(models.Model):
             scale_diag=self.scale(x[..., dim:]),
         )
         return tf.squeeze(distr.sample(1), axis=0)
-
-    def call(self, inputs, training):
-        B, T, D = inputs.get_shape().as_list()
-
+    
+    #@tf.function
+    def call(self, inputs:tf.Tensor, training):
+        input_shape =  inputs.get_shape()
+        B, T, D = input_shape[0], input_shape[1], input_shape[2]
         # Store outputs
         ta_zd_param = tf.TensorArray(
             dtype=inputs[0].dtype,
             size=T,
-            element_shape=(B, self.hidden_units * 2),
+            element_shape=tf.TensorShape((B, self.hidden_units * 2)),
         )
         ta_x_param = tf.TensorArray(
             dtype=inputs[0].dtype,
             size=T,
-            element_shape=(B, self.output_units * 2),
+            element_shape=tf.TensorShape((B, self.output_units * 2)),
         )
 
         ta_h_states = tf.TensorArray(
             dtype=inputs[0].dtype,
             size=T,
-            element_shape=(B, self.hidden_units),
+            element_shape=tf.TensorShape((B, self.hidden_units)),
         )
 
         ta_zd_sample = tf.TensorArray(
-            dtype=inputs[0].dtype, size=T, element_shape=(B, self.hidden_units)
+            dtype=inputs[0].dtype, size=T, element_shape=tf.TensorShape((B, self.hidden_units))
         )
         ta_x_sample = tf.TensorArray(
-            dtype=inputs[0].dtype, size=T, element_shape=(B, self.output_units)
+            dtype=inputs[0].dtype, size=T, element_shape=tf.TensorShape((B, self.output_units))
         )
 
         # Compute priors
@@ -182,7 +183,7 @@ class GenerativeVariationalMixture(models.Model):
         zg_y_sample = self.gaussian_sample(zg_y_param)
 
         # Initialize recurrent state
-        h_state = tf.zeros((B, *self.P_zd_h.state_size))
+        h_state = tf.zeros(tf.TensorShape((B, *self.P_zd_h.state_size)))
 
         for t in range(T):
             [h_state, zd_param, zd_sample], _ = self.P_zd_h(
@@ -325,6 +326,7 @@ class InferenceVariationalMixture(models.Model):
         )
         return tf.squeeze(distr.sample(1), axis=0)
 
+    #@tf.function
     def call(self, inputs, h_states, training, temperature=0.5):
         y_x_param = self.y_x(inputs, training=training)
         y_x_sample = self.categorial_sample(y_x_param, temperature)
