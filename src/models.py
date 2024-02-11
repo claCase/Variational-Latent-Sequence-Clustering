@@ -9,10 +9,11 @@ from tensorflow_probability.python.distributions import (
     MultivariateNormalDiag,
     kl_divergence,
 )
-import layers 
-from importlib import reload 
+import layers
+from importlib import reload
 
 reload(layers)
+
 
 class VariationalMixtureRNN(models.Model):
     """_summary_
@@ -97,11 +98,9 @@ class VariationalMixtureRNN(models.Model):
     def build(self, input_shape):
         super().build(input_shape=input_shape)
 
-
     @staticmethod
     def scale(scale):
         return 1e-3 + tf.math.softplus(0.05 * scale)
-
 
     def kl_z(self, Q, P):
         """
@@ -125,41 +124,17 @@ class VariationalMixtureRNN(models.Model):
         cat = OneHotCategorical(logits=y)
         return cat.entropy()
 
-    def call(self, inputs, training, *args, **kwargs):
-        (
-            y_sample,
-            zg_y_sample,
-            zd_sample,
-            ta_x_sample,
-            zg_y_param,
-            zd_param,
-            x_param,
-            h_states,
-        ) = self.generative(inputs, training=training)
-        (
-            y_x_sample,
-            zg_sample,
-            zd_x_h_sample,
-            y_x_param,
-            zg_param,
-            zd_x_h_param,
-        ) = self.inference(inputs, h_states, training=training)
-        return (
-            y_sample,
-            zg_y_sample,
-            zd_sample,
-            ta_x_sample,
-            zg_y_param,
-            zd_param,
-            x_param,
-            h_states,
-        ), (y_x_sample, zg_sample, zd_x_h_sample, y_x_param, zg_param, zd_x_h_param)
-
+    def call(self, inputs, training=False, *args, **kwargs):
+        generative = self.generative(inputs, training=training)
+        h_states = generative["h_states"]
+        inference = self.inference(inputs, h_states, training=training)
+        return generative, inference
 
     def train_step(self, data):
-        print(tf.shape(data), data.get_shape())
         x = data
         with tf.GradientTape() as tape:
+            generative, inference = self.call(x, training=True)
+
             (
                 P_y_sample,
                 P_zg_sample,
@@ -176,30 +151,35 @@ class VariationalMixtureRNN(models.Model):
                 Q_y_x_param,
                 Q_zg_param,
                 Q_zd_x_h_param,
-            ) = self.call(
-                x, training=True
+            ) = (
+                generative.values(),
+                inference.values(),
             )
-
             # E[p(x|z_g, z_d, h_d)] = log-likelihood
-            nll = -tf.reduce_mean(
-                MultivariateNormalDiag(
-                    P_x_param[..., : self.output_units],
-                    self.scale(P_x_param[..., self.output_units :]),
-                ).log_prob(x)
+            nll = tf.reduce_mean(
+                tf.reduce_sum(
+                    MultivariateNormalDiag(
+                        P_x_param[..., : self.output_units],
+                        self.scale(P_x_param[..., self.output_units :]),
+                    ).log_prob(x),
+                    axis=-1,
+                )
             )
 
             # KL(zd_posterior||zd_prior)
             kl_Q_zd_x_h__P_zd_h = self.kl_z(Q_zd_x_h_param, P_zd_param)
-            zd_loss = -tf.reduce_mean(kl_Q_zd_x_h__P_zd_h)
+            zd_loss = tf.reduce_mean(tf.reduce_sum(kl_Q_zd_x_h__P_zd_h, -1))
 
             # KL(zg_posterior||zg_prior)
             kl_Q_zg_x_y__P_zg_y = self.kl_z(Q_zg_param, P_zg_param)
-            zg_loss = -tf.reduce_mean(kl_Q_zg_x_y__P_zg_y)
+            zg_loss = tf.reduce_mean(tf.reduce_sum(kl_Q_zg_x_y__P_zg_y, -1))
 
             # Entropy of infrence cluster assignment
-            entr_y = tf.reduce_mean(self.categorical_entropy(Q_y_x_param))
+            entr_y = tf.reduce_mean(
+                tf.reduce_sum(self.categorical_entropy(Q_y_x_param), -1)
+            )
 
-            tot_loss = nll + zd_loss + zg_loss + entr_y
+            tot_loss = -(nll - zd_loss - zg_loss + entr_y)  # negative loss since optimizer minizies
         grad = tape.gradient(tot_loss, self.trainable_variables)
         self.optimizer.apply_gradients(zip(grad, self.trainable_variables))
 
@@ -207,6 +187,7 @@ class VariationalMixtureRNN(models.Model):
 
 
 if __name__ == "__main__":
-    '''i = np.random.normal(size=(100, 50, 15))
+    """i = np.random.normal(size=(100, 50, 15))
+    i = tf.cast(i, tf.float32)
     vrnn = VariationalMixtureRNN(15, 10)
-    o = vrnn(i)'''
+    o = vrnn(i)"""

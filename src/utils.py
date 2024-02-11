@@ -47,3 +47,5 @@ def generate_trajectories(
         ta = ta.write(t, x)
     trajectories = ta.stack() + initial_samples
     return trajectories
+
+

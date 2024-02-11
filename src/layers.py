@@ -89,14 +89,14 @@ class VariationalRecurrenceCell(
         )
         return tf.squeeze(distr.sample(1), axis=0)
 
-    #@tf.function
+    # @tf.function
     def call(self, inputs, states, training):
         h_prime, _ = self.cell(inputs, states, training)
         z_prime = self.z_encoder(h_prime)
         z_prime_sample = self.gaussian_sample(z_prime)
         zh_concat = tf.concat([h_prime, z_prime_sample], axis=-1)
         zh_prime = self.h_encoder(zh_concat)
-        return [h_prime, z_prime, z_prime_sample], zh_prime
+        return [zh_prime, z_prime, z_prime_sample], zh_prime
 
 
 class GenerativeVariationalMixture(models.Model):
@@ -147,10 +147,11 @@ class GenerativeVariationalMixture(models.Model):
             scale_diag=self.scale(x[..., dim:]),
         )
         return tf.squeeze(distr.sample(1), axis=0)
-    
-    #@tf.function
-    def call(self, inputs:tf.Tensor, training):
-        input_shape =  inputs.get_shape()
+
+    # @tf.function
+    def call(self, inputs: tf.Tensor, training):
+        input_shape = inputs.shape
+
         B, T, D = input_shape[0], input_shape[1], input_shape[2]
         # Store outputs
         ta_zd_param = tf.TensorArray(
@@ -171,14 +172,19 @@ class GenerativeVariationalMixture(models.Model):
         )
 
         ta_zd_sample = tf.TensorArray(
-            dtype=inputs[0].dtype, size=T, element_shape=tf.TensorShape((B, self.hidden_units))
+            dtype=inputs[0].dtype,
+            size=T,
+            element_shape=tf.TensorShape((B, self.hidden_units)),
         )
         ta_x_sample = tf.TensorArray(
-            dtype=inputs[0].dtype, size=T, element_shape=tf.TensorShape((B, self.output_units))
+            dtype=inputs[0].dtype,
+            size=T,
+            element_shape=tf.TensorShape((B, self.output_units)),
         )
 
         # Compute priors
-        y_sample = self.P_y.sample((B,))
+        y_sample = self.P_y.sample(tf.TensorShape((B, 1)))
+        y_sample = tf.squeeze(y_sample, axis=-2)
         zg_y_param = self.P_zg_y(y_sample)
         zg_y_sample = self.gaussian_sample(zg_y_param)
 
@@ -197,16 +203,16 @@ class GenerativeVariationalMixture(models.Model):
             ta_x_param = ta_x_param.write(t, x_param)
             ta_x_sample = ta_x_sample.write(t, x_sample)
             ta_h_states = ta_h_states.write(t, h_state)
-        return (
-            y_sample,
-            zg_y_sample,
-            tf.transpose(ta_zd_sample.stack(),perm=(1, 0, 2)),
-            tf.transpose(ta_x_sample.stack(), perm=(1, 0, 2)),
-            zg_y_param,
-            tf.transpose(ta_zd_param.stack(), perm=(1, 0, 2)),
-            tf.transpose(ta_x_param.stack(), perm=(1, 0, 2)),
-            tf.transpose(ta_h_states.stack(), perm=(1, 0, 2)),
-        )
+        return {
+            "y_sample": y_sample,
+            "zg__y_sample": zg_y_sample,
+            "zd_sample": tf.transpose(ta_zd_sample.stack(), perm=(1, 0, 2)),
+            "x_sample": tf.transpose(ta_x_sample.stack(), perm=(1, 0, 2)),
+            "zg_y_param": zg_y_param,
+            "zd_param": tf.transpose(ta_zd_param.stack(), perm=(1, 0, 2)),
+            "x_param": tf.transpose(ta_x_param.stack(), perm=(1, 0, 2)),
+            "h_states": tf.transpose(ta_h_states.stack(), perm=(1, 0, 2)),
+        }
 
 
 class RNNWithConstants(
@@ -326,7 +332,7 @@ class InferenceVariationalMixture(models.Model):
         )
         return tf.squeeze(distr.sample(1), axis=0)
 
-    #@tf.function
+    # @tf.function
     def call(self, inputs, h_states, training, temperature=0.5):
         y_x_param = self.y_x(inputs, training=training)
         y_x_sample = self.categorial_sample(y_x_param, temperature)
@@ -335,7 +341,14 @@ class InferenceVariationalMixture(models.Model):
         xh = tf.concat([inputs, h_states], axis=-1)
         zd_x_h_param = self.zd_x_h(xh)
         zd_x_h_sample = self.gaussian_sample(zd_x_h_param)
-        return y_x_sample, zg_sample, zd_x_h_sample, y_x_param, zg_param, zd_x_h_param
+        return {
+            "y__x_sample": y_x_sample,
+            "zg__y_sample": zg_sample,
+            "zd__x_h_sample": zd_x_h_sample,
+            "y__x_param": y_x_param,
+            "zg_param": zg_param,
+            "zd_x_h_param": zd_x_h_param,
+        }
 
 
 if __name__ == "__main__":
@@ -348,6 +361,6 @@ if __name__ == "__main__":
     """
     gen = GenerativeVariationalMixture(15, 10, 0.1, "relu", "linear", 5)
     o = gen(i)
-    
+
     inf = InferenceVariationalMixture(15, 10, 0.1, "relu", "linear", 5)
     o = inf(i, o[-1])
