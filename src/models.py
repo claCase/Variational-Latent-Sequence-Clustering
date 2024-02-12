@@ -133,7 +133,7 @@ class VariationalMixtureRNN(models.Model):
     def train_step(self, data):
         x = data
         with tf.GradientTape() as tape:
-            generative, inference = self.call(x, training=True)
+            generative, inference = self.call(x[:, :-1, :], training=True)
 
             (
                 P_y_sample,
@@ -161,7 +161,7 @@ class VariationalMixtureRNN(models.Model):
                     MultivariateNormalDiag(
                         P_x_param[..., : self.output_units],
                         self.scale(P_x_param[..., self.output_units :]),
-                    ).log_prob(x),
+                    ).log_prob(x[:, 1:, :]),
                     axis=-1,
                 )
             )

@@ -120,14 +120,14 @@ class GenerativeVariationalMixture(models.Model):
         self.clusters = clusters
 
         self.P_y = OneHotCategorical(logits=[1.0] * clusters)
-        self.P_zg_y = layers.Dense(hidden_units * 2, activation="linear")
+        self.P_zg_y = layers.Dense(hidden_units * 2, activation=activation)
         self.P_zd_h = VariationalRecurrenceCell(
             hidden_units=hidden_units,
-            activation="linear",
+            activation=activation,
             recurrent_activation=recurrent_activation,
             dropout=dropout,
         )
-        self.P_x_zg_zd_h = layers.Dense(output_units * 2, "linear")
+        self.P_x_zg_zd_h = layers.Dense(output_units * 2, activation)
         # self.P_x_zg_zd_h = VariationalRecurrenceCell(units=output_units*2, return_sequences=True, return_state=True, recurrent_activation=activation, recurrent_dropout=dropout_rate)
 
     @staticmethod
@@ -277,20 +277,25 @@ class InferenceVariationalMixture(models.Model):
         self.clusters = clusters
         self.output_units = output_units
 
-        self.y_x = layers.Bidirectional(
-            layers.GRU(
-                units=clusters,
-                return_sequences=False,
-                return_state=False,
-                activation="linear",
-                recurrent_activation=recurrent_activation,
-                recurrent_dropout=dropout,
-                dropout=dropout,
-            )
+        self.y_x = models.Sequential(
+            [
+                layers.Bidirectional(
+                    layers.GRU(
+                        units=hidden_units,
+                        return_sequences=False,
+                        return_state=False,
+                        activation=activation,
+                        recurrent_activation=recurrent_activation,
+                        recurrent_dropout=dropout,
+                        dropout=dropout,
+                    )
+                ),
+                layers.Dense(clusters, activation),
+            ]
         )
         self.zg_x_y = layers.RNN(
             RNNWithConstants(
-                activation="linear",
+                activation=activation,
                 units=hidden_units * 2,
                 recurrent_activation=recurrent_activation,
                 recurrent_dropout=dropout,
@@ -300,7 +305,7 @@ class InferenceVariationalMixture(models.Model):
             return_state=True,
         )
 
-        self.zd_x_h = layers.Dense(self.hidden_units * 2, activation="linear")
+        self.zd_x_h = layers.Dense(self.hidden_units * 2, activation=activation)
 
     def categorial_sample(self, logits, temperature=1.0, sample_shape=(1,)):
         """_summary_

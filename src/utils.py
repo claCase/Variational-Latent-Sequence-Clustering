@@ -20,6 +20,8 @@ def generate_trajectories(
     samples=30,
     length=100,
     clusters_beta=((0.5, 0.9), (0.9, 0.6)),
+    initial_pos=np.asarray([[ 2.,  2.],
+                            [-2., -2.]]),
     dt=1e-1,
 ):
     if isinstance(clusters_diffusion, list) or isinstance(clusters_diffusion, tuple):
@@ -46,6 +48,11 @@ def generate_trajectories(
         x = x + tf.squeeze(x_prime) * clusters_beta[None, ...] * dt
         ta = ta.write(t, x)
     trajectories = ta.stack() + initial_samples
-    return trajectories
+    return trajectories + initial_pos[None, None, :, :]
 
 
+if __name__ == '__main__':
+    diff = [np.eye(2)]*2
+    drift = [np.zeros((2,))]*2
+    beta = [(0.9, 0.5), (0.5, 0.9)]
+    traj = generate_trajectories(clusters_diffusion=diff, clusters_drift=drift, clusters_beta=beta)
