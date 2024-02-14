@@ -52,7 +52,11 @@ def generate_trajectories(
 
 
 if __name__ == '__main__':
+    import matplotlib.pyplot as plt 
     diff = [np.eye(2)]*2
     drift = [np.zeros((2,))]*2
     beta = [(0.9, 0.5), (0.5, 0.9)]
     traj = generate_trajectories(clusters_diffusion=diff, clusters_drift=drift, clusters_beta=beta)
+    traj_ = tf.cast(tf.transpose(tf.reshape(traj, (100, -1, 2)), (1, 0, 2)), tf.float32)
+    for i in range(60):
+        plt.plot(traj_[i, :, 0], traj_[i, :, 1])
