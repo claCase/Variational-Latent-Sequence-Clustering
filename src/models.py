@@ -64,6 +64,7 @@ class VariationalMixtureRNN(models.Model):
         dropout_rate=0.1,
         activation="tanh",
         recurrent_activation="tanh",
+        output_activation="linear",
         clusters=5,
         rnn_type="gru",
         **kwargs
@@ -74,6 +75,7 @@ class VariationalMixtureRNN(models.Model):
         self.drouput_rate = dropout_rate
         self.activation = activation
         self.recurrent_activation = recurrent_activation
+        self.output_activation = output_activation
         self.clusters = clusters
 
         self.generative = layers.GenerativeVariationalMixture(
@@ -83,6 +85,7 @@ class VariationalMixtureRNN(models.Model):
             clusters=clusters,
             activation=activation,
             recurrent_activation=recurrent_activation,
+            output_activation=output_activation,
             rnn_type=rnn_type,
         )
 
@@ -156,7 +159,7 @@ class VariationalMixtureRNN(models.Model):
                 inference.values(),
             )
             # E[p(x|z_g, z_d, h_d)] = log-likelihood
-            nll = tf.reduce_mean(
+            ll = tf.reduce_mean(
                 tf.reduce_sum(
                     MultivariateNormalDiag(
                         P_x_param[..., : self.output_units],
@@ -179,11 +182,11 @@ class VariationalMixtureRNN(models.Model):
                 tf.reduce_sum(self.categorical_entropy(Q_y_x_param), -1)
             )
 
-            tot_loss = -(nll - zd_loss - zg_loss + entr_y)  # negative loss since optimizer minizies
+            tot_loss = -(ll - zd_loss - zg_loss + entr_y)  # negative loss since optimizer minizies
         grad = tape.gradient(tot_loss, self.trainable_variables)
         self.optimizer.apply_gradients(zip(grad, self.trainable_variables))
 
-        return {"nll": nll, "zd_loss": zd_loss, "zg_loss": zg_loss, "entr_y": entr_y}
+        return {"ll": ll, "zd_loss": zd_loss, "zg_loss": zg_loss, "entr_y": entr_y}
 
 
 if __name__ == "__main__":
