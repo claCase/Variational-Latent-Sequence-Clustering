@@ -119,7 +119,6 @@ class GenerativeVariationalMixture(models.Model):
         self.activation = activation
         self.tnn_type = rnn_type
         self.clusters = clusters
-
         self.P_y = OneHotCategorical(logits=[1.0] * clusters)
         self.P_zg_y = layers.Dense(hidden_units * 2, activation=activation)
         self.P_zd_h = VariationalRecurrenceCell(
@@ -149,7 +148,7 @@ class GenerativeVariationalMixture(models.Model):
         )
         return tf.squeeze(distr.sample(1), axis=0)
 
-    # @tf.function
+    @tf.function
     def call(self, inputs: tf.Tensor, training):
         input_shape = inputs.shape
 
@@ -197,7 +196,7 @@ class GenerativeVariationalMixture(models.Model):
                 inputs[:, t, :], h_state, training
             )
             x_in_concat = tf.concat([zd_sample, zg_y_sample, h_state], axis=-1)
-            x_param = self.P_x_zg_zd_h(x_in_concat, training=training)
+            x_param = self.P_x_zg_zd_h(x_in_concat, training=training) 
             x_sample = self.gaussian_sample(x_param)
             ta_zd_param = ta_zd_param.write(t, zd_param)
             ta_zd_sample = ta_zd_sample.write(t, zd_sample)
@@ -322,7 +321,7 @@ class InferenceVariationalMixture(models.Model):
                             dropout=dropout,
                         ),
                         return_sequences=False,
-                        return_state=True,
+                        return_state=False,
                     )
         self.zd_x_h = layers.Dense(self.hidden_units * 2, activation=activation)
 
@@ -356,11 +355,11 @@ class InferenceVariationalMixture(models.Model):
         )
         return tf.squeeze(distr.sample(1), axis=0)
 
-    # @tf.function
+    @tf.function
     def call(self, inputs, h_states, training, temperature=0.5):
         y_x_param = self.y_x(inputs, training=training)
         y_x_sample = self.categorial_sample(y_x_param, temperature)
-        zg_param, _ = self.zg_x_y(inputs, constants=y_x_sample, training=training)
+        zg_param = self.zg_x_y(inputs, constants=y_x_sample, training=training)
         zg_sample = self.gaussian_sample(zg_param)
         xh = tf.concat([inputs, h_states], axis=-1)
         zd_x_h_param = self.zd_x_h(xh)
@@ -376,15 +375,16 @@ class InferenceVariationalMixture(models.Model):
 
 
 if __name__ == "__main__":
-    tf.config.run_functions_eagerly(False)
+    """tf.config.run_functions_eagerly(False)
     i = np.random.normal(size=(100, 50, 10))
     vr = VariationalRecurrenceCell(15, 0.1, "relu", "linear")
-    """rnn = layers.RNN(vr, return_state=True, return_sequences=True)
+    rnn = layers.RNN(vr, return_state=True, return_sequences=True)
     o = rnn(i)
     # print(o[0].shape, o[1].shape)
-    """
+    
     gen = GenerativeVariationalMixture(15, 10, 0.1, "relu", "linear", 5)
     o = gen(i)
 
     inf = InferenceVariationalMixture(15, 10, 0.1, "relu", "linear", 5)
     o = inf(i, o[-1])
+    """

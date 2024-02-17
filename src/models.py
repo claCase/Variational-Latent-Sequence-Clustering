@@ -61,7 +61,7 @@ class VariationalMixtureRNN(models.Model):
         self,
         output_units,
         hidden_units=15,
-        dropout_rate=0.1,
+        dropout_rate=0.,
         activation="tanh",
         recurrent_activation="tanh",
         output_activation="linear",
@@ -77,6 +77,9 @@ class VariationalMixtureRNN(models.Model):
         self.recurrent_activation = recurrent_activation
         self.output_activation = output_activation
         self.clusters = clusters
+        self.zd_loss_weight = 1.0
+        self.zg_loss_weight = 1.0 
+        self.entr_weight = 1.0 
 
         self.generative = layers.GenerativeVariationalMixture(
             hidden_units=hidden_units,
@@ -182,7 +185,7 @@ class VariationalMixtureRNN(models.Model):
                 tf.reduce_sum(self.categorical_entropy(Q_y_x_param), -1)
             )
 
-            tot_loss = -(ll - zd_loss - zg_loss + entr_y)  # negative loss since optimizer minizies
+            tot_loss = -(ll - self.zd_loss_weight*zd_loss - self.zg_loss_weight*zg_loss + self.entr_weight*entr_y)  # negative loss since optimizer minizies
         grad = tape.gradient(tot_loss, self.trainable_variables)
         self.optimizer.apply_gradients(zip(grad, self.trainable_variables))
 
@@ -190,7 +193,15 @@ class VariationalMixtureRNN(models.Model):
 
 
 if __name__ == "__main__":
-    """i = np.random.normal(size=(100, 50, 15))
+    '''i = np.random.normal(size=(100, 50, 15))
     i = tf.cast(i, tf.float32)
     vrnn = VariationalMixtureRNN(15, 10)
-    o = vrnn(i)"""
+    o = vrnn(i)
+    with tf.device("GPU:0"):
+        epochs = 500
+        pbar = tf.keras.utils.Progbar(epochs, )
+        for e in range(epochs):
+            h = vrnn.train_step(i)
+            #print(f"{i}: ll: {h['ll']}  zd: {h['zd_loss']}  zg: {h['zg_loss']}  enty: {h['entr_y']}")
+            pbar.update(e,values=h.items(), finalize=False)
+        pbar.update(e+1, finalize=True)'''
