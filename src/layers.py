@@ -89,7 +89,7 @@ class VariationalRecurrenceCell(
         )
         return tf.squeeze(distr.sample(1), axis=0)
 
-    # @tf.function
+    @tf.function
     def call(self, inputs, states, training):
         h_prime, _ = self.cell(inputs, states, training)
         z_prime = self.z_encoder(h_prime)
@@ -196,7 +196,7 @@ class GenerativeVariationalMixture(models.Model):
                 inputs[:, t, :], h_state, training
             )
             x_in_concat = tf.concat([zd_sample, zg_y_sample, h_state], axis=-1)
-            x_param = self.P_x_zg_zd_h(x_in_concat, training=training) 
+            x_param = self.P_x_zg_zd_h(x_in_concat, training=training)
             x_sample = self.gaussian_sample(x_param)
             ta_zd_param = ta_zd_param.write(t, zd_param)
             ta_zd_sample = ta_zd_sample.write(t, zd_sample)
@@ -294,7 +294,7 @@ class InferenceVariationalMixture(models.Model):
             ]
         )
 
-        '''self.zg_x_y = models.Sequential(
+        """self.zg_x_y = models.Sequential(
             [
                 layers.Bidirectional(
                     layers.RNN(
@@ -311,18 +311,18 @@ class InferenceVariationalMixture(models.Model):
                 ),
                 layers.Dense(hidden_units * 2, activation),
             ]
-        )'''
+        )"""
         self.zg_x_y = layers.RNN(
-                        RNNWithConstants(
-                            activation=activation,
-                            units=hidden_units * 2,
-                            recurrent_activation=recurrent_activation,
-                            recurrent_dropout=dropout,
-                            dropout=dropout,
-                        ),
-                        return_sequences=False,
-                        return_state=False,
-                    )
+            RNNWithConstants(
+                activation=activation,
+                units=hidden_units * 2,
+                recurrent_activation=recurrent_activation,
+                recurrent_dropout=dropout,
+                dropout=dropout,
+            ),
+            return_sequences=False,
+            return_state=False,
+        )
         self.zd_x_h = layers.Dense(self.hidden_units * 2, activation=activation)
 
     def categorial_sample(self, logits, temperature=1.0, sample_shape=(1,)):
@@ -366,10 +366,10 @@ class InferenceVariationalMixture(models.Model):
         zd_x_h_sample = self.gaussian_sample(zd_x_h_param)
         return {
             "y_x_sample": y_x_sample,
-            "zg_y_sample": zg_sample,
+            "zg_y_x_sample": zg_sample,
             "zd_x_h_sample": zd_x_h_sample,
             "y_x_param": y_x_param,
-            "zg_param": zg_param,
+            "zg_y_x_param": zg_param,
             "zd_x_h_param": zd_x_h_param,
         }
 
@@ -381,7 +381,7 @@ if __name__ == "__main__":
     rnn = layers.RNN(vr, return_state=True, return_sequences=True)
     o = rnn(i)
     # print(o[0].shape, o[1].shape)
-    
+
     gen = GenerativeVariationalMixture(15, 10, 0.1, "relu", "linear", 5)
     o = gen(i)
 
