@@ -9,7 +9,7 @@ from tensorflow_probability.python.distributions import (
     MultivariateNormalDiag,
     kl_divergence,
 )
-import layers
+import src.layers as layers
 from importlib import reload
 
 reload(layers)
@@ -359,6 +359,7 @@ class VariationalRNN(models.Model):
         x_sample = self.gaussian_sample(x_param)
         return {"states": o, "x_param": x_param, "x_sample": x_sample}
 
+    @tf.function
     def train_step(self, data):
         with tf.GradientTape() as tape:
             o = self(data, training=True)
