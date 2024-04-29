@@ -200,14 +200,15 @@ class DiscreteVariationalMixtureRNN(models.Model):
         D_ = inputs_shape_[2]
         # Infer cluster Assignment via the Bi-Directional RNN
         bi_h = self._birnn(inputs)
+        y_logits = self.y_given_h(bi_h)
         # The inferred cluster assignment is also used as conditioning for generation
         if training:
             # If training then take a reparametrized relaxed sample
-            y = self.relaxed_softmax(self.y_given_h(bi_h))
+            y = self.relaxed_softmax(y_logits)
             y_sample = tf.squeeze(y.sample(1), 0)
         else:
             # if not training then take hard-max sample
-            y = self.categorical_onehot(self.y_given_h(bi_h))
+            y = self.categorical_onehot(y_logits)
             y_sample = tf.cast(tf.squeeze(y.sample(1), 0), inputs.dtype)
 
         # Infer global latent variable zg prior/posterior
@@ -270,7 +271,7 @@ class DiscreteVariationalMixtureRNN(models.Model):
         else:
             kl_zg = self.kl(zg_prior, zg_posterior)
 
-        y_entr = y.entropy()
+        y_entr = self.categorical_onehot(y_logits).entropy()
         elbo = x_ll - self.kl_weight*(kl_zd + kl_zg) + y_entr
 
         return {
