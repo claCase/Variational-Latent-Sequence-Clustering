@@ -1,6 +1,6 @@
 # %%
 import tensorflow as tf
-from keras import layers, models
+from tensorflow.keras import layers, models
 import numpy as np
 import pandas as pd
 from tensorflow_probability.python.distributions import (
@@ -14,10 +14,10 @@ from tensorflow.python.keras.layers.recurrent import (
     _config_for_enable_caching_device,
     _caching_device,
 )
+from tensorflow_probability.python.layers import DistributionLambda
 
-# from utils import scale
 
-
+@tf.keras.saving.register_keras_serializable(package="Variational")
 class VariationalRecurrenceCell(
     DropoutRNNCellMixin, tf.keras.__internal__.layers.BaseRandomLayer
 ):
@@ -99,6 +99,7 @@ class VariationalRecurrenceCell(
         return [zh_prime, z_prime, z_prime_sample], zh_prime
 
 
+@tf.keras.saving.register_keras_serializable(package="Variational")
 class GenerativeVariationalMixture(models.Model):
     def __init__(
         self,
@@ -150,8 +151,9 @@ class GenerativeVariationalMixture(models.Model):
 
     @tf.function
     def call(self, inputs: tf.Tensor, training):
+        # print("generative call")
         input_shape = inputs.shape
-
+        B_ = tf.shape(inputs)[0]
         B, T, D = input_shape[0], input_shape[1], input_shape[2]
         # Store outputs
         ta_zd_param = tf.TensorArray(
@@ -183,13 +185,13 @@ class GenerativeVariationalMixture(models.Model):
         )
 
         # Compute priors
-        y_sample = self.P_y.sample(tf.TensorShape((B, 1)))
+        y_sample = self.P_y.sample((B_, 1))
         y_sample = tf.squeeze(y_sample, axis=-2)
         zg_y_param = self.P_zg_y(y_sample)
         zg_y_sample = self.gaussian_sample(zg_y_param)
 
         # Initialize recurrent state
-        h_state = tf.zeros(tf.TensorShape((B, *self.P_zd_h.state_size)))
+        h_state = tf.zeros((B_, *self.P_zd_h.state_size))
 
         for t in range(T):
             [h_state, zd_param, zd_sample], _ = self.P_zd_h(
@@ -215,6 +217,7 @@ class GenerativeVariationalMixture(models.Model):
         }
 
 
+@tf.keras.saving.register_keras_serializable(package="Variational")
 class RNNWithConstants(
     DropoutRNNCellMixin, tf.keras.__internal__.layers.BaseRandomLayer
 ):
@@ -253,12 +256,17 @@ class RNNWithConstants(
         self.state_size = units
         self.output_size = units
 
+    @tf.function
     def call(self, inputs, states, constants):
+        # print(f"inputs {inputs.shape}")
+        # print(f"states {states[0].shape}")
+        # print(f"constants {constants[0].shape}")
         inputs = tf.concat([inputs, constants[0]], axis=-1)
         h, _ = self.cell(inputs, states)
         return h, h
 
 
+@tf.keras.saving.register_keras_serializable(package="Variational")
 class InferenceVariationalMixture(models.Model):
     def __init__(
         self,
@@ -277,7 +285,7 @@ class InferenceVariationalMixture(models.Model):
         self.clusters = clusters
         self.output_units = output_units
 
-        self.y_x = models.Sequential(
+        self.h_x = models.Sequential(
             [
                 layers.Bidirectional(
                     layers.GRU(
@@ -311,7 +319,7 @@ class InferenceVariationalMixture(models.Model):
                 ),
                 layers.Dense(hidden_units * 2, activation),
             ]
-        )"""
+        )
         self.zg_x_y = layers.RNN(
             RNNWithConstants(
                 activation=activation,
@@ -322,8 +330,10 @@ class InferenceVariationalMixture(models.Model):
             ),
             return_sequences=False,
             return_state=False,
-        )
+        )"""
+        self.zg_x_y = layers.Dense(hidden_units * 2, "linear")
         self.zd_x_h = layers.Dense(self.hidden_units * 2, activation=activation)
+        self.y_x = layers.Dense(self.clusters, activation=activation)
 
     def categorial_sample(self, logits, temperature=1.0, sample_shape=(1,)):
         """_summary_
@@ -356,13 +366,35 @@ class InferenceVariationalMixture(models.Model):
         return tf.squeeze(distr.sample(1), axis=0)
 
     @tf.function
-    def call(self, inputs, h_states, training, temperature=0.5):
-        y_x_param = self.y_x(inputs, training=training)
+    def call(self, inputs, h_states, training, temperature=1.):
+        """Inference function
+
+        Args:
+            inputs (tf.Tensor): inputs of shape (B, T, D)
+            h_states (tf.Tensor): states from the generative distribution of shape (B, T, H)
+            training (bool): True if training
+            temperature (int, optional): Temperature of Gibbs distribution. Defaults to 1.
+
+        Returns:
+            dict(
+            "y_x_sample",
+            "zg_y_x_sample",
+            "zd_x_h_sample",
+            "y_x_param",
+            "zg_y_x_param",
+            "zd_x_h_param",
+            )
+        """
+        # hidden state summary of time series
+        h_x = self.h_x(inputs, training=training)
+        # posterior categorical sample: classify time series from hidden state
+        y_x_param = self.y_x(h_x)
         y_x_sample = self.categorial_sample(y_x_param, temperature)
-        zg_param = self.zg_x_y(inputs, constants=y_x_sample, training=training)
+        # posterior global latent vetor sampling: combine categorical sample with hidden state
+        zg_param = self.zg_x_y(tf.concat([h_x, y_x_sample], -1), training=training)
         zg_sample = self.gaussian_sample(zg_param)
-        xh = tf.concat([inputs, h_states], axis=-1)
-        zd_x_h_param = self.zd_x_h(xh)
+
+        zd_x_h_param = self.zd_x_h(h_states)
         zd_x_h_sample = self.gaussian_sample(zd_x_h_param)
         return {
             "y_x_sample": y_x_sample,
