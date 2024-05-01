@@ -299,7 +299,7 @@ class DiscreteVariationalMixtureRNN(models.Model):
         if inputs is not None:
             out = self(inputs, training=False)
             y_sample = out["y_sample"]
-            zg_sample = out["zg_posterior_sample"]
+            zg_sample = out["zg_sample"]
             h_state = out["h_states"][:, -1]
             #x = out["x_samples"][:, -1]
             x = inputs[:, -1]
@@ -314,7 +314,7 @@ class DiscreteVariationalMixtureRNN(models.Model):
                 zg = self.mvn(
                     self.zg_given_h_y_posterior(tf.concat([bi_h, y_sample], -1))
                 )
-                zg_sample = tf.squeeze(zg.sample(1), 0)
+            zg_sample = tf.squeeze(zg.sample(1), 0)
             h_state = tf.zeros((B, self.state_size))
             
         dtype = inputs.dtype if inputs is not None else tf.float32
