@@ -70,6 +70,7 @@ class DiscreteVariationalMixtureRNN(models.Model):
         recurrent_dropout=False,
         temperature=1.,
         use_sample_kl=True,
+        free_runnning_prob=0.5,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -78,6 +79,7 @@ class DiscreteVariationalMixtureRNN(models.Model):
         self.latend_global_units = latent_global_units
         self.use_kl_sample = use_sample_kl
         self.clusters = clusters
+        self.free_running_prob = tf.maximum(1, tf.minimum(free_runnning_prob, 0))
         self.temperature = temperature
         self.kl_weight = 1.
         if rnn_type == "gru":
@@ -238,8 +240,12 @@ class DiscreteVariationalMixtureRNN(models.Model):
             element_shape=tf.TensorShape((B_, self.state_size)),
         )
         # Generation
-        for t in range(T_):
-            x = inputs[:, t]
+        for t in range(T_-1):
+            teacher_force = tf.math.greater(tf.random.uniform((1,), 0.,1.), self.free_running_prob)
+            if t == 0 or teacher_force:
+                x = inputs[:, t]
+            else:
+                x = x_recon_sample
             # hidden recurrence
             h_state, _ = self._rnn_cell(x, states=h_state, training=training)
             h_states = h_states.write(t, h_state)
@@ -269,7 +275,7 @@ class DiscreteVariationalMixtureRNN(models.Model):
             )
             x_recon_sample = tf.squeeze(x_recon.sample(1), 0)
             x_samples = x_samples.write(t, x_recon_sample)
-            x_ll += x_recon.log_prob(x)
+            x_ll += x_recon.log_prob(inputs[:, t+1])
 
         # Static latent kl divergence
         if self.use_kl_sample:
@@ -291,7 +297,7 @@ class DiscreteVariationalMixtureRNN(models.Model):
         }
 
     @tf.function
-    def sample(self, inputs=None, samples=10, length=50, from_prior=True):
+    def sample(self, inputs=None, samples=10, length=50, from_prior=True, use_mean=True):
         B =  tf.shape(inputs)[0] if inputs is not None else samples
         B_ =  inputs.shape[0] if inputs is not None else samples
 
@@ -314,7 +320,10 @@ class DiscreteVariationalMixtureRNN(models.Model):
                 zg = self.mvn(
                     self.zg_given_h_y_posterior(tf.concat([bi_h, y_sample], -1))
                 )
-            zg_sample = tf.squeeze(zg.sample(1), 0)
+            if use_mean:
+                zg_sample = zg.mean()
+            else:
+                zg_sample = tf.squeeze(zg.sample(1), 0)
             h_state = tf.zeros((B, self.state_size))
             
         dtype = inputs.dtype if inputs is not None else tf.float32
@@ -341,12 +350,18 @@ class DiscreteVariationalMixtureRNN(models.Model):
             # prior and posterior inference of dynamic latent variable
             if from_prior:
                 zd_prior = self.mvn(self.zd_given_h_prior(h_state))
-                zd_sample = tf.squeeze(zd_prior.sample(1), 0)
+                if use_mean:
+                    zd_sample = zd_prior.mean()
+                else:
+                    zd_sample = tf.squeeze(zd_prior.sample(1), 0)
             else:
                 zd_posterior = self.mvn(
                     self.zd_given_x_h_posterior(tf.concat([x, h_state], -1))
                 )
-                zd_sample = tf.squeeze(zd_posterior.sample(1), 0)
+                if use_mean:
+                    zd_sample = zd_posterior.mean()
+                else:
+                    zd_sample = tf.squeeze(zd_posterior.sample(1), 0)
             zd_samples = zd_samples.write(t, zd_sample)
             zd_sample_encoded = self.z_encoder(zd_sample)
             # inference of output distribution
