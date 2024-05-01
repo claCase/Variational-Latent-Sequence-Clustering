@@ -284,8 +284,8 @@ class DiscreteVariationalMixtureRNN(models.Model):
         return {
             "x_samples": tf.transpose(x_samples.stack(), (1, 0, 2)),
             "y_sample": y_sample,
-            "zg_posterior_sample": zg_posterior_sample,
-            "zd_posterior_sample": tf.transpose(zd_samples.stack(), (1, 0, 2)),
+            "zg_sample": zg_posterior_sample,
+            "zd_sample": tf.transpose(zd_samples.stack(), (1, 0, 2)),
             "h_states": tf.transpose(h_states.stack(), (1, 0, 2)),
             "elbo": elbo,
         }
@@ -299,7 +299,7 @@ class DiscreteVariationalMixtureRNN(models.Model):
         if inputs is not None:
             out = self(inputs, training=False)
             y_sample = out["y_sample"]
-            zg_posterior_sample = out["zg_posterior_sample"]
+            zg_sample = out["zg_posterior_sample"]
             h_state = out["h_states"][:, -1]
             #x = out["x_samples"][:, -1]
             x = inputs[:, -1]
@@ -348,12 +348,12 @@ class DiscreteVariationalMixtureRNN(models.Model):
                 )
                 zd_sample = tf.squeeze(zd_posterior.sample(1), 0)
             zd_samples = zd_samples.write(t, zd_sample)
-            zd_posterior_sample_encoded = self.z_encoder(zd_sample)
+            zd_sample_encoded = self.z_encoder(zd_sample)
             # inference of output distribution
             x_recon = self.mvn(
                 self.x_given_zg_zd_h(
                     tf.concat(
-                        [zd_sample, zg_posterior_sample, h_state], -1
+                        [zd_sample_encoded, zg_sample, h_state], -1
                     )
                 )
             )
@@ -367,8 +367,8 @@ class DiscreteVariationalMixtureRNN(models.Model):
         return {
             "x_samples": x_samples if inputs is None else tf.concat([out["x_samples"], x_samples], 1) ,
             "y_sample": y_sample,
-            "zg_posterior_sample": zg_sample,
-            "zd_posterior_sample": zd_samples if inputs is None else tf.concat([out["zd_posterior_sample"], zd_samples], 1),
+            "zg_sample": zg_sample,
+            "zd_sample": zd_samples if inputs is None else tf.concat([out["zd_sample"], zd_samples], 1),
             "h_states": h_states if inputs is None else tf.concat([out["h_states"], h_states], 1),
         }
 
