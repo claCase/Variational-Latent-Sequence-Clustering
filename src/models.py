@@ -14,6 +14,7 @@ from src import layers
 
 tfkl = tf.keras.layers
 
+
 @tf.keras.saving.register_keras_serializable(package="Variational")
 class DiscreteVariationalMixtureRNN(models.Model):
     """Implementation Discrete Variational Mixture RNN from https://arxiv.org/abs/2101.09500
@@ -68,7 +69,7 @@ class DiscreteVariationalMixtureRNN(models.Model):
         rnn_type="gru",
         dropout=False,
         recurrent_dropout=False,
-        temperature=1.,
+        temperature=1.0,
         use_sample_kl=True,
         free_runnning_prob=0.5,
         **kwargs,
@@ -79,9 +80,11 @@ class DiscreteVariationalMixtureRNN(models.Model):
         self.latend_global_units = latent_global_units
         self.use_kl_sample = use_sample_kl
         self.clusters = clusters
-        self.free_running_prob = tf.maximum(1, tf.minimum(free_runnning_prob, 0))
+        self.free_running_prob = tf.cast(
+            tf.maximum(1.0, tf.minimum(free_runnning_prob, 0.0)), tf.float32
+        )
         self.temperature = temperature
-        self.kl_weight = 1.
+        self.kl_weight = 1.0
         if rnn_type == "gru":
             _cell = tfkl.GRUCell
         elif rnn_type == "lstm":
@@ -240,8 +243,10 @@ class DiscreteVariationalMixtureRNN(models.Model):
             element_shape=tf.TensorShape((B_, self.state_size)),
         )
         # Generation
-        for t in range(T_-1):
-            teacher_force = tf.math.greater(tf.random.uniform((1,), 0.,1.), self.free_running_prob)
+        for t in range(T_ - 1):
+            teacher_force = tf.math.greater(
+                tf.random.uniform((1,), 0.0, 1.0), self.free_running_prob
+            )
             if t == 0 or teacher_force:
                 x = inputs[:, t]
             else:
@@ -275,7 +280,7 @@ class DiscreteVariationalMixtureRNN(models.Model):
             )
             x_recon_sample = tf.squeeze(x_recon.sample(1), 0)
             x_samples = x_samples.write(t, x_recon_sample)
-            x_ll += x_recon.log_prob(inputs[:, t+1])
+            x_ll += x_recon.log_prob(inputs[:, t + 1])
 
         # Static latent kl divergence
         if self.use_kl_sample:
@@ -285,7 +290,7 @@ class DiscreteVariationalMixtureRNN(models.Model):
 
         # Entropy of categorical distribution
         y_entr = self.categorical_onehot(y_logits).entropy()
-        elbo = x_ll - self.kl_weight*(kl_zd + kl_zg) + y_entr
+        elbo = x_ll - self.kl_weight * (kl_zd + kl_zg) + y_entr
 
         return {
             "x_samples": tf.transpose(x_samples.stack(), (1, 0, 2)),
@@ -297,18 +302,18 @@ class DiscreteVariationalMixtureRNN(models.Model):
         }
 
     @tf.function
-    def sample(self, inputs=None, samples=10, length=50, from_prior=True, use_mean=True):
-        B =  tf.shape(inputs)[0] if inputs is not None else samples
-        B_ =  inputs.shape[0] if inputs is not None else samples
-
+    def sample(
+        self, inputs=None, samples=10, length=50, from_prior=True, use_mean=True
+    ):
+        B = tf.shape(inputs)[0] if inputs is not None else samples
+        B_ = inputs.shape[0] if inputs is not None else samples
 
         if inputs is not None:
             out = self(inputs, training=False)
             y_sample = out["y_sample"]
             zg_sample = out["zg_sample"]
             h_state = out["h_states"][:, -1]
-            #x = out["x_samples"][:, -1]
-            x = inputs[:, -1]
+            x = inputs[:, -2]
         else:
             y_sample = tf.cast(self.y_prior.sample(samples), tf.float32)
             x = tf.random.normal(shape=(samples, 1, self.output_size))
@@ -325,7 +330,7 @@ class DiscreteVariationalMixtureRNN(models.Model):
             else:
                 zg_sample = tf.squeeze(zg.sample(1), 0)
             h_state = tf.zeros((B, self.state_size))
-            
+
         dtype = inputs.dtype if inputs is not None else tf.float32
         x_samples = tf.TensorArray(
             dtype=dtype,
@@ -367,9 +372,7 @@ class DiscreteVariationalMixtureRNN(models.Model):
             # inference of output distribution
             x_recon = self.mvn(
                 self.x_given_zg_zd_h(
-                    tf.concat(
-                        [zd_sample_encoded, zg_sample, h_state], -1
-                    )
+                    tf.concat([zd_sample_encoded, zg_sample, h_state], -1)
                 )
             )
             x_recon_sample = tf.squeeze(x_recon.sample(1), 0)
@@ -380,13 +383,24 @@ class DiscreteVariationalMixtureRNN(models.Model):
         zd_samples = tf.transpose(zd_samples.stack(), (1, 0, 2))
         h_states = tf.transpose(h_states.stack(), (1, 0, 2))
         return {
-            "x_samples": x_samples if inputs is None else tf.concat([out["x_samples"], x_samples], 1) ,
+            "x_samples": (
+                x_samples
+                if inputs is None
+                else tf.concat([out["x_samples"], x_samples], 1)
+            ),
             "y_sample": y_sample,
             "zg_sample": zg_sample,
-            "zd_sample": zd_samples if inputs is None else tf.concat([out["zd_sample"], zd_samples], 1),
-            "h_states": h_states if inputs is None else tf.concat([out["h_states"], h_states], 1),
+            "zd_sample": (
+                zd_samples
+                if inputs is None
+                else tf.concat([out["zd_sample"], zd_samples], 1)
+            ),
+            "h_states": (
+                h_states
+                if inputs is None
+                else tf.concat([out["h_states"], h_states], 1)
+            ),
         }
-
 
     def train_step(self, data):
         @tf.function
@@ -395,10 +409,104 @@ class DiscreteVariationalMixtureRNN(models.Model):
                 out = self(data, training=True)
                 loss = -tf.reduce_mean(out["elbo"])
             return tape.gradient(loss, self.trainable_variables), loss
+
         grad, loss = step()
         self.optimizer.apply_gradients(zip(grad, self.trainable_variables))
         return {"elbo": -loss}
 
+
+class RecurrentNN(models.Model):
+    def __init__(
+        self,
+        units,
+        hidden_units,
+        rnn_type="gru",
+        out_activation="linear",
+        activation="silu",
+        recurrent_activation="silu",
+        recurrent_dropout=0,
+        dropout=0,
+        **kwargs
+    ):
+        super().__init__(**kwargs)
+
+        if rnn_type == "gru":
+            _cell = tfkl.GRUCell
+        elif rnn_type == "lstm":
+            _cell = tfkl.LSTMCell
+        elif rnn_type == "rnn":
+            _cell = tfkl.SimpleRNNCell
+        else:
+            raise NotImplementedError(
+                f"rnn_type {rnn_type} invalid. Choose between rnn, lstm, gru"
+            )
+        self.state_size = hidden_units
+        self.output_size = units
+        self._out = tfkl.Dense(units, activation)
+        self._cell = _cell(
+                units=hidden_units,
+                activation=activation,
+                recurrent_activation=recurrent_activation,
+                dropout=dropout,
+                recurrent_dropout=dropout,
+            )
+        self._rnn = tfkl.RNN(
+            self._cell,
+            return_state=True,
+            return_sequences=True,
+        )
+
+    def call(self, inputs, training=False):
+        h_states, h_state = self._rnn(inputs)
+        x = self._out(h_states)
+        return {"output": x, "states": h_states}
+    
+    def train_step(self, data):
+        @tf.function
+        def step():
+            with tf.GradientTape() as tape:
+                out = self(data[:, :-1], training=True)
+                loss = tf.reduce_mean(tf.keras.losses.mean_squared_error(data[:, 1:], out["output"]))
+            return tape.gradient(loss, self.trainable_variables), loss
+
+        grad, loss = step()
+        self.optimizer.apply_gradients(zip(grad, self.trainable_variables))
+        return {"loss": loss}
+    
+    @tf.function
+    def sample(self, inputs, prev_state=None, length=100):
+        inputs_shape = tf.shape(inputs)
+        inputs_shape_ = inputs.shape
+        B = inputs_shape[0]
+        B_ = inputs_shape_[0]
+        if prev_state is None:
+            h_state = tf.zeros((B, self.state_size))
+        else:
+            h_state = prev_state
+        
+        x_samples = tf.TensorArray(
+            dtype=inputs.dtype,
+            size=length,
+            element_shape=tf.TensorShape((B_, self.output_size)),
+        )
+        h_states = tf.TensorArray(
+            dtype=inputs.dtype,
+            size=length,
+            element_shape=tf.TensorShape((B_, self.state_size)),
+        )
+
+        # initialize recurrence
+        h_states_prev, h_state = self._rnn(inputs, initial_state=h_state, training=False)
+        x = self._out(h_states_prev)
+        x_prev = x[:, -2]
+        # free running sampling
+        for t in range(length):
+            _, h_state = self._cell(x_prev, h_state)
+            x_prev = self._out(h_state)
+            x_samples = x_samples.write(t, x_prev)
+            h_states = h_states.write(t, h_state)
+        return {"output":tf.concat([x, tf.transpose(x_samples.stack(), (1, 0, 2))], 1), 
+                "states":tf.concat([h_states_prev, tf.transpose(h_states.stack(), (1, 0, 2))], 1)}
 
 
 if __name__ == "__main__":
