@@ -29,7 +29,7 @@ def process_motion_sense(dataset_path, save_path):
                 df = pd.read_csv(fzo, delimiter=",", header=0, index_col=0)
                 tmove = [fz.split("/")[1]] * len(df)
                 df["movement"] = tmove
-                df["idx"] = np.asarray(range(len(df)), dtype=str)
+                df["idx"] = np.asarray(range(len(df)), dtype=int)
                 df["subject"] = [subject] * len(df)
                 df.set_index(["subject", "movement", "idx"], inplace=True)
                 if subjects is None:
@@ -56,8 +56,8 @@ def df_to_matrix(df: pd.DataFrame,
     print("DataFrame to Matrix conversion")
     idx = df.index
     levels = idx.nlevels
-    idx_np = np.array((*zip(idx.tolist()),)).squeeze()
-    unique_idx = [np.sort(np.unique(idx_np[:, i])) for i in range(levels)]
+    #idx_np = np.array((*zip(idx.tolist()),)).squeeze()
+    unique_idx = [np.sort(np.unique(idx.get_level_values(i))) for i in range(levels)]
     levels_name = list(idx.names)
     if idx_mapping is None:
         print("Processing indices...")
@@ -74,8 +74,8 @@ def df_to_matrix(df: pd.DataFrame,
         max_ids = [np.max(list(i.values())) for i in maps]
 
     print("Assigning values to indices...")
-    for id, r in tqdm(zip(idx_np, df.iterrows()), total=len(idx_np)):
-        np_ids = [maps[i][j] for i, j in enumerate(id)]
+    for id_, r in tqdm(zip(idx.tolist(), df.iterrows()), total=len(idx)):
+        np_ids = [maps[i][j] for i, j in enumerate(id_)]
         matrix[(*np_ids, None)] = r[1:]
 
     columns = list(df.columns)
@@ -83,7 +83,8 @@ def df_to_matrix(df: pd.DataFrame,
     if save_path:
         try:
             np.save(os.path.join(save_path, name + "_matrix.npy"), matrix)
-            np.save(os.path.join(save_path, name + "_unique_index.npy"), unique_idx)
+            with open(os.path.join(save_path, name + "_unique_index.npy"), "wb") as file:
+                pickle.dump(unique_idx, file)
             with open(os.path.join(save_path, name + "_index_mappings.pkl"), "wb") as file:
                 pickle.dump(maps, file)
             with open(os.path.join(save_path, name + "_columns_names.pkl"), "wb") as file:
