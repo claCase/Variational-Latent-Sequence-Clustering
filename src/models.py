@@ -1,4 +1,3 @@
-#  %%
 import tensorflow as tf
 from tensorflow.keras import models
 import numpy as np
@@ -67,6 +66,7 @@ class DiscreteVariationalMixtureRNN(models.Model):
         output_activation="linear",
         clusters=5,
         rnn_type="gru",
+        stateful=False,
         dropout=False,
         recurrent_dropout=False,
         temperature=1.0,
@@ -85,44 +85,44 @@ class DiscreteVariationalMixtureRNN(models.Model):
         )
         self.temperature = temperature
         self.kl_weight = 1.0
+        _cell_args = dict(
+            units=hidden_units,
+            activation=activation,
+            recurrent_activation=recurrent_activation,
+            recurrent_dropout=recurrent_dropout,
+            dropout=dropout)
         if rnn_type == "gru":
             _cell = tfkl.GRUCell
         elif rnn_type == "lstm":
             _cell = tfkl.LSTMCell
         elif rnn_type == "rnn":
             _cell = tfkl.SimpleRNNCell
+        elif rnn_type == "indrnn" :
+            _cell = layers.IndipendentRNNCell
+            _cell_args.pop("recurrent_activation")
         else:
             raise NotImplementedError(
                 f"rnn_type {rnn_type} invalid. Choose between rnn, lstm, gru"
             )
-        self._rnn_cell = _cell(
-            units=hidden_units,
-            activation=activation,
-            recurrent_activation=recurrent_activation,
-            recurrent_dropout=recurrent_dropout,
-            dropout=dropout,
-        )
+        self._rnn_cell = _cell(**_cell_args)
         # Bi-RNN used to infer posterior over sequential time series
         self._birnn = models.Sequential(
             [
                 tfkl.Bidirectional(
                     tfkl.RNN(
-                        _cell(
-                            units=hidden_units,
-                            activation=activation,
-                            recurrent_activation=recurrent_activation,
-                            dropout=dropout,
-                            recurrent_dropout=dropout,
-                        ),
+                        _cell(**_cell_args),
                         return_state=False,
                         return_sequences=False,
+                        stateful=stateful,
                     )
                 ),
-                tfkl.Dense(clusters, activation),
+                tfkl.Dense(clusters, output_activation),
             ]
         )
+        self.stateful = stateful
         self.state_size = hidden_units
         self.output_size = output_units
+        self.states = None
         self.y_given_h = tfkl.Dense(clusters, activation="linear")
         self.zg_given_h_y_posterior = tfkl.Dense(
             latent_global_units * 2, activation="linear"
@@ -138,6 +138,9 @@ class DiscreteVariationalMixtureRNN(models.Model):
         self.x_given_zg_zd_h = tfkl.Dense(output_units * 2)
         self.y_prior = OneHotCategorical(logits=[1.0] * clusters)
 
+    def reset_states(self):
+        self.states = None
+            
     def relaxed_softmax(self, logits):
         """Reparametrized softmax sample from Bibbs-Boltzman distribution
 
@@ -224,7 +227,13 @@ class DiscreteVariationalMixtureRNN(models.Model):
         zg_posterior_sample = tf.squeeze(zg_posterior.sample(1), 0)
 
         # initialize hidden state of generating recurrent nn
-        h_state = tf.zeros((B, self.state_size))
+        if self.stateful:
+            if self.states is not None:
+                h_state = self.states
+            else:
+                h_state = tf.zeros((B, self.state_size))
+        else:
+            h_state = tf.zeros((B, self.state_size))
         kl_zd = tf.zeros((B,))
         x_ll = tf.zeros((B,))
         x_samples = tf.TensorArray(
@@ -292,6 +301,8 @@ class DiscreteVariationalMixtureRNN(models.Model):
         y_entr = self.categorical_onehot(y_logits).entropy()
         elbo = x_ll - self.kl_weight * (kl_zd + kl_zg) + y_entr
 
+        if self.stateful:
+            self.states = h_state
         return {
             "x_samples": tf.transpose(x_samples.stack(), (1, 0, 2)),
             "y_sample": y_sample,
@@ -403,7 +414,7 @@ class DiscreteVariationalMixtureRNN(models.Model):
         }
 
     def train_step(self, data):
-        @tf.function
+        #@tf.function
         def step():
             with tf.GradientTape() as tape:
                 out = self(data, training=True)
@@ -429,13 +440,21 @@ class RecurrentNN(models.Model):
         **kwargs
     ):
         super().__init__(**kwargs)
-
+        _cell_args = dict(
+            units=hidden_units,
+            activation=activation,
+            recurrent_activation=recurrent_activation,
+            recurrent_dropout=recurrent_dropout,
+            dropout=dropout)
         if rnn_type == "gru":
             _cell = tfkl.GRUCell
         elif rnn_type == "lstm":
             _cell = tfkl.LSTMCell
         elif rnn_type == "rnn":
             _cell = tfkl.SimpleRNNCell
+        elif rnn_type == "indrnn" :
+            _cell = layers.IndipendentRNN
+            _cell_args.pop("recurrent_activation")
         else:
             raise NotImplementedError(
                 f"rnn_type {rnn_type} invalid. Choose between rnn, lstm, gru"
@@ -444,25 +463,22 @@ class RecurrentNN(models.Model):
         self.output_size = units
         self._out = tfkl.Dense(units, activation)
         self._cell = _cell(
-                units=hidden_units,
-                activation=activation,
-                recurrent_activation=recurrent_activation,
-                dropout=dropout,
-                recurrent_dropout=dropout,
+                **_cell_args
             )
         self._rnn = tfkl.RNN(
             self._cell,
             return_state=True,
             return_sequences=True,
         )
-
+        
+    @tf.function
     def call(self, inputs, training=False):
         h_states, h_state = self._rnn(inputs)
         x = self._out(h_states)
         return {"output": x, "states": h_states}
     
     def train_step(self, data):
-        @tf.function
+        #@tf.function
         def step():
             with tf.GradientTape() as tape:
                 out = self(data[:, :-1], training=True)
