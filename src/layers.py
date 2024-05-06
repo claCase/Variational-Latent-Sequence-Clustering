@@ -99,311 +99,64 @@ class VariationalRecurrenceCell(
         return [zh_prime, z_prime, z_prime_sample], zh_prime
 
 
-@tf.keras.saving.register_keras_serializable(package="Variational")
-class GenerativeVariationalMixture(models.Model):
-    def __init__(
-        self,
-        hidden_units,
-        output_units,
-        dropout,
-        activation,
-        recurrent_activation,
-        output_activation,
-        clusters,
-        rnn_type="gru",
-        **kwargs,
-    ):
-        super(GenerativeVariationalMixture, self).__init__(**kwargs)
-        self.hidden_units = hidden_units
-        self.output_units = output_units
-        self.dropout = dropout
-        self.activation = activation
-        self.tnn_type = rnn_type
-        self.clusters = clusters
-        self.P_y = OneHotCategorical(logits=[1.0] * clusters)
-        self.P_zg_y = layers.Dense(hidden_units * 2, activation=activation)
-        self.P_zd_h = VariationalRecurrenceCell(
-            hidden_units=hidden_units,
-            activation=activation,
-            recurrent_activation=recurrent_activation,
-            dropout=dropout,
-        )
-        self.P_x_zg_zd_h = layers.Dense(output_units * 2, output_activation)
-        # self.P_x_zg_zd_h = VariationalRecurrenceCell(units=output_units*2, return_sequences=True, return_state=True, recurrent_activation=activation, recurrent_dropout=dropout_rate)
-
-    @staticmethod
-    def scale(scale):
-        return 1e-3 + tf.math.softplus(0.05 * scale)
-
-    def gaussian_sample(self, x):
-        """
-        Sample a random vector from a gaussian distribution. Tensorflow probability already reparametrizes the samples to make the parameters differentiable :)
-        Inputs:
-            x: Tensor of shape of shape 2*d partitioned in [mean, variance] params
-        """
-        dim = tf.shape(x)[-1] // 2
-
-        distr = MultivariateNormalDiag(
-            loc=x[..., :dim],
-            scale_diag=self.scale(x[..., dim:]),
-        )
-        return tf.squeeze(distr.sample(1), axis=0)
-
-    @tf.function
-    def call(self, inputs: tf.Tensor, training):
-        # print("generative call")
-        input_shape = inputs.shape
-        B_ = tf.shape(inputs)[0]
-        B, T, D = input_shape[0], input_shape[1], input_shape[2]
-        # Store outputs
-        ta_zd_param = tf.TensorArray(
-            dtype=inputs[0].dtype,
-            size=T,
-            element_shape=tf.TensorShape((B, self.hidden_units * 2)),
-        )
-        ta_x_param = tf.TensorArray(
-            dtype=inputs[0].dtype,
-            size=T,
-            element_shape=tf.TensorShape((B, self.output_units * 2)),
-        )
-
-        ta_h_states = tf.TensorArray(
-            dtype=inputs[0].dtype,
-            size=T,
-            element_shape=tf.TensorShape((B, self.hidden_units)),
-        )
-
-        ta_zd_sample = tf.TensorArray(
-            dtype=inputs[0].dtype,
-            size=T,
-            element_shape=tf.TensorShape((B, self.hidden_units)),
-        )
-        ta_x_sample = tf.TensorArray(
-            dtype=inputs[0].dtype,
-            size=T,
-            element_shape=tf.TensorShape((B, self.output_units)),
-        )
-
-        # Compute priors
-        y_sample = self.P_y.sample((B_, 1))
-        y_sample = tf.squeeze(y_sample, axis=-2)
-        zg_y_param = self.P_zg_y(y_sample)
-        zg_y_sample = self.gaussian_sample(zg_y_param)
-
-        # Initialize recurrent state
-        h_state = tf.zeros((B_, *self.P_zd_h.state_size))
-
-        for t in range(T):
-            [h_state, zd_param, zd_sample], _ = self.P_zd_h(
-                inputs[:, t, :], h_state, training
-            )
-            x_in_concat = tf.concat([zd_sample, zg_y_sample, h_state], axis=-1)
-            x_param = self.P_x_zg_zd_h(x_in_concat, training=training)
-            x_sample = self.gaussian_sample(x_param)
-            ta_zd_param = ta_zd_param.write(t, zd_param)
-            ta_zd_sample = ta_zd_sample.write(t, zd_sample)
-            ta_x_param = ta_x_param.write(t, x_param)
-            ta_x_sample = ta_x_sample.write(t, x_sample)
-            ta_h_states = ta_h_states.write(t, h_state)
-        return {
-            "y_sample": y_sample,
-            "zg_y_sample": zg_y_sample,
-            "zd_sample": tf.transpose(ta_zd_sample.stack(), perm=(1, 0, 2)),
-            "x_sample": tf.transpose(ta_x_sample.stack(), perm=(1, 0, 2)),
-            "zg_y_param": zg_y_param,
-            "zd_param": tf.transpose(ta_zd_param.stack(), perm=(1, 0, 2)),
-            "x_param": tf.transpose(ta_x_param.stack(), perm=(1, 0, 2)),
-            "h_states": tf.transpose(ta_h_states.stack(), perm=(1, 0, 2)),
-        }
-
-
-@tf.keras.saving.register_keras_serializable(package="Variational")
-class RNNWithConstants(
-    DropoutRNNCellMixin, tf.keras.__internal__.layers.BaseRandomLayer
-):
+class IndipendentRNNCell(DropoutRNNCellMixin, tf.keras.__internal__.layers.BaseRandomLayer):
     def __init__(
         self,
         units,
         activation,
-        recurrent_activation,
-        dropout,
-        recurrent_dropout,
-        rnn_type="gru",
+        initializer="glorot_uniform",
+        regularizer=None,
+        dropout=0, 
+        recurrent_dropout=0,
         **kwargs,
     ):
-        super(RNNWithConstants, self).__init__(**kwargs)
-        self.units = units
-        self.dropout = dropout
-        self.recurrent_dropout = recurrent_dropout
-        self.recurrent_activation = recurrent_activation
-        if rnn_type == "gru":
-            _cell = layers.GRUCell
-        elif rnn_type == "lstm":
-            _cell = layers.LSTMCell
-        elif rnn_type == "rnn":
-            _cell = layers.SimpleRNNCell
+        super().__init__(**kwargs)
+        self.output_size = tf.TensorShape(units)
+        self.state_size = tf.TensorShape(units)
+        self.initializer = initializer
+        self.regularizer = regularizer
+        self.dropout = dropout 
+        self.recurrent_dropout = recurrent_dropout 
+        self.activation = tf.keras.activations.get(activation)
+
+        if tf.compat.v1.executing_eagerly_outside_functions():
+            self._enable_caching_device = kwargs.pop("enable_caching_device", True)
         else:
-            raise NotImplementedError(
-                f"rnn_type {rnn_type} invalid. Choose between rnn, lstm, gru"
-            )
-        self.cell = _cell(
-            units=units,
-            activation=activation,
-            recurrent_activation=recurrent_activation,
-            recurrent_dropout=recurrent_dropout,
-            dropout=dropout,
+            self._enable_caching_device = kwargs.pop("enable_caching_device", False)
+
+    def build(self, input_shape):
+        state_size = self.state_size.as_list()[0]
+        self._recurrent_kernel = self.add_weight(
+            "recurrent_kernel",
+            shape=(state_size,),
+            initializer=self.initializer,
+            regularizer=self.regularizer,
         )
-        self.state_size = units
-        self.output_size = units
-
-    @tf.function
-    def call(self, inputs, states, constants):
-        # print(f"inputs {inputs.shape}")
-        # print(f"states {states[0].shape}")
-        # print(f"constants {constants[0].shape}")
-        inputs = tf.concat([inputs, constants[0]], axis=-1)
-        h, _ = self.cell(inputs, states)
-        return h, h
-
-
-@tf.keras.saving.register_keras_serializable(package="Variational")
-class InferenceVariationalMixture(models.Model):
-    def __init__(
-        self,
-        hidden_units,
-        output_units,
-        dropout,
-        activation,
-        recurrent_activation,
-        clusters,
-        **kwargs,
-    ):
-        super(InferenceVariationalMixture, self).__init__(**kwargs)
-        self.hidden_units = hidden_units
-        self.dropout = dropout
-        self.activation = activation
-        self.clusters = clusters
-        self.output_units = output_units
-
-        self.h_x = models.Sequential(
-            [
-                layers.Bidirectional(
-                    layers.GRU(
-                        units=hidden_units,
-                        return_sequences=False,
-                        return_state=False,
-                        activation=activation,
-                        recurrent_activation=recurrent_activation,
-                        recurrent_dropout=dropout,
-                        dropout=dropout,
-                    )
-                ),
-                layers.Dense(clusters, activation),
-            ]
+        self._input_kernel = self.add_weight(
+            "recurrent_kernel",
+            shape=(input_shape[-1],state_size),
+            initializer=self.initializer,
+            regularizer=self.regularizer,
         )
-
-        """self.zg_x_y = models.Sequential(
-            [
-                layers.Bidirectional(
-                    layers.RNN(
-                        RNNWithConstants(
-                            activation=activation,
-                            units=hidden_units * 2,
-                            recurrent_activation=recurrent_activation,
-                            recurrent_dropout=dropout,
-                            dropout=dropout,
-                        ),
-                        return_sequences=False,
-                        return_state=True,
-                    )
-                ),
-                layers.Dense(hidden_units * 2, activation),
-            ]
+        self._bias =  self.add_weight(
+            "recurrent_kernel",
+            shape=(state_size,),
+            initializer=tf.keras.initializers.Zeros(),
+            regularizer=self.regularizer,
         )
-        self.zg_x_y = layers.RNN(
-            RNNWithConstants(
-                activation=activation,
-                units=hidden_units * 2,
-                recurrent_activation=recurrent_activation,
-                recurrent_dropout=dropout,
-                dropout=dropout,
-            ),
-            return_sequences=False,
-            return_state=False,
-        )"""
-        self.zg_x_y = layers.Dense(hidden_units * 2, "linear")
-        self.zd_x_h = layers.Dense(self.hidden_units * 2, activation=activation)
-        self.y_x = layers.Dense(self.clusters, activation=activation)
-
-    def categorial_sample(self, logits, temperature=1.0, sample_shape=(1,)):
-        """_summary_
-        Samples from a one-hot-categorical via the gumbal-softmax reparametrization trick, samples are already reparametrized by tensorflow probability :)
-        Args:
-            logits (_type_): _description_
-            sample_shape (tuple, optional): _description_. Defaults to (1,).
-
-        Returns:
-            _type_: _description_
-        """
-        cat = RelaxedOneHotCategorical(temperature=temperature, logits=logits)
-        return tf.squeeze(cat.sample(sample_shape), axis=0)
-
-    @staticmethod
-    def scale(scale):
-        return 1e-3 + tf.math.softplus(0.05 * scale)
-
-    def gaussian_sample(self, x):
-        """
-        Sample a random vector from a gaussian distribution. Tensorflow probability already reparametrizes the samples to make the parameters differentiable :)
-        Inputs:
-            x: Tensor of shape of shape 2*d partitioned in [mean, variance] params
-        """
-        dim = tf.shape(x)[-1] // 2
-        distr = MultivariateNormalDiag(
-            loc=x[..., :dim],
-            scale_diag=self.scale(x[..., dim:]),
-        )
-        return tf.squeeze(distr.sample(1), axis=0)
-
-    @tf.function
-    def call(self, inputs, h_states, training, temperature=1.):
-        """Inference function
-
-        Args:
-            inputs (tf.Tensor): inputs of shape (B, T, D)
-            h_states (tf.Tensor): states from the generative distribution of shape (B, T, H)
-            training (bool): True if training
-            temperature (int, optional): Temperature of Gibbs distribution. Defaults to 1.
-
-        Returns:
-            dict(
-            "y_x_sample",
-            "zg_y_x_sample",
-            "zd_x_h_sample",
-            "y_x_param",
-            "zg_y_x_param",
-            "zd_x_h_param",
-            )
-        """
-        # hidden state summary of time series
-        h_x = self.h_x(inputs, training=training)
-        # posterior categorical sample: classify time series from hidden state
-        y_x_param = self.y_x(h_x)
-        y_x_sample = self.categorial_sample(y_x_param, temperature)
-        # posterior global latent vetor sampling: combine categorical sample with hidden state
-        zg_param = self.zg_x_y(tf.concat([h_x, y_x_sample], -1), training=training)
-        zg_sample = self.gaussian_sample(zg_param)
-
-        zd_x_h_param = self.zd_x_h(h_states)
-        zd_x_h_sample = self.gaussian_sample(zd_x_h_param)
-        return {
-            "y_x_sample": y_x_sample,
-            "zg_y_x_sample": zg_sample,
-            "zd_x_h_sample": zd_x_h_sample,
-            "y_x_param": y_x_param,
-            "zg_y_x_param": zg_param,
-            "zd_x_h_param": zd_x_h_param,
-        }
+    def call(self, inputs, states, training):
+        states = states[0]
+        x_h = tf.matmul(inputs, self._input_kernel)
+        if self.dropout:
+            x_h_drop = self.get_dropout_mask_for_cell(x_h, training=training, count=1) 
+            x_h = x_h * x_h_drop
+        h_h = tf.multiply(states, self._recurrent_kernel)
+        if self.recurrent_dropout:
+            h_h_drop = self.get_recurrent_dropout_mask_for_cell(h_h, training=training, count=1)
+            h_h = h_h * h_h_drop 
+        x = self.activation(x_h + h_h + self._bias)
+        return x, x
+        
 
 
 if __name__ == "__main__":
