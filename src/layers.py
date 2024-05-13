@@ -125,24 +125,28 @@ class IndipendentRNNCell(DropoutRNNCellMixin, tf.keras.__internal__.layers.BaseR
             self._enable_caching_device = kwargs.pop("enable_caching_device", False)
 
     def build(self, input_shape):
+        default_caching_device = _caching_device(self)
         state_size = self.state_size.as_list()[0]
         self._recurrent_kernel = self.add_weight(
             "recurrent_kernel",
             shape=(state_size,),
             initializer=self.initializer,
             regularizer=self.regularizer,
+            caching_device=default_caching_device,
         )
         self._input_kernel = self.add_weight(
             "recurrent_kernel",
             shape=(input_shape[-1],state_size),
             initializer=self.initializer,
             regularizer=self.regularizer,
+            caching_device=default_caching_device,
         )
         self._bias =  self.add_weight(
             "recurrent_kernel",
             shape=(state_size,),
             initializer=tf.keras.initializers.Zeros(),
             regularizer=self.regularizer,
+            caching_device=default_caching_device,
         )
     def call(self, inputs, states, training):
         states = states[0]

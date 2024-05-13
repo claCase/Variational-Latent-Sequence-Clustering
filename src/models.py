@@ -196,15 +196,12 @@ class DiscreteVariationalMixtureRNN(models.Model):
             inputs (tf.Tensor): (B, T, D) B=batch, T=time length, D=input dimension
             training (bool, optional): Is Trainig. Defaults to False.
         """
+        
         inputs_shape = tf.shape(inputs)
-        inputs_shape_ = inputs.shape
         B = inputs_shape[0]
         T = inputs_shape[1]
         D = inputs_shape[2]
-
-        B_ = inputs_shape_[0]
-        T_ = inputs_shape_[1]
-        D_ = inputs_shape_[2]
+    
         # Infer cluster Assignment via the Bi-Directional RNN
         bi_h = self._birnn(inputs)
         y_logits = self.y_given_h(bi_h)
@@ -237,22 +234,20 @@ class DiscreteVariationalMixtureRNN(models.Model):
         kl_zd = tf.zeros((B,))
         x_ll = tf.zeros((B,))
         x_samples = tf.TensorArray(
-            dtype=inputs.dtype,
-            size=T_,
-            element_shape=tf.TensorShape((B_, self.output_size)),
+            dtype=tf.float32,
+            size=T,
         )
         zd_samples = tf.TensorArray(
-            dtype=inputs.dtype,
-            size=T_,
-            element_shape=tf.TensorShape((B_, self.latend_dynamic_units)),
+            dtype=tf.float32,
+            size=T,
         )
         h_states = tf.TensorArray(
-            dtype=inputs.dtype,
-            size=T_,
-            element_shape=tf.TensorShape((B_, self.state_size)),
+            dtype=tf.float32,
+            size=T,
         )
+        x_recon_sample = tf.zeros(shape=(B, D))
         # Generation
-        for t in range(T_ - 1):
+        for t in tf.range(T - 1):
             teacher_force = tf.math.greater(
                 tf.random.uniform((1,), 0.0, 1.0), self.free_running_prob
             )
@@ -316,8 +311,10 @@ class DiscreteVariationalMixtureRNN(models.Model):
     def sample(
         self, inputs=None, samples=10, length=50, from_prior=True, use_mean=True
     ):
-        B = tf.shape(inputs)[0] if inputs is not None else samples
-        B_ = inputs.shape[0] if inputs is not None else samples
+        inputs_shape = tf.shape(inputs)
+        B = inputs_shape[0]
+        T = inputs_shape[1]
+        D = inputs_shape[2]
 
         if inputs is not None:
             out = self(inputs, training=False)
@@ -346,17 +343,14 @@ class DiscreteVariationalMixtureRNN(models.Model):
         x_samples = tf.TensorArray(
             dtype=dtype,
             size=length,
-            element_shape=tf.TensorShape((B_, self.output_size)),
         )
         zd_samples = tf.TensorArray(
             dtype=dtype,
             size=length,
-            element_shape=tf.TensorShape((B_, self.latend_dynamic_units)),
         )
         h_states = tf.TensorArray(
             dtype=dtype,
             size=length,
-            element_shape=tf.TensorShape((B_, self.state_size)),
         )
         # Generation
         for t in range(length):
@@ -492,9 +486,9 @@ class RecurrentNN(models.Model):
     @tf.function
     def sample(self, inputs, prev_state=None, length=100):
         inputs_shape = tf.shape(inputs)
-        inputs_shape_ = inputs.shape
         B = inputs_shape[0]
-        B_ = inputs_shape_[0]
+        T = inputs_shape[1]
+        D = inputs_shape[2]
         if prev_state is None:
             h_state = tf.zeros((B, self.state_size))
         else:
@@ -503,12 +497,10 @@ class RecurrentNN(models.Model):
         x_samples = tf.TensorArray(
             dtype=inputs.dtype,
             size=length,
-            element_shape=tf.TensorShape((B_, self.output_size)),
         )
         h_states = tf.TensorArray(
             dtype=inputs.dtype,
             size=length,
-            element_shape=tf.TensorShape((B_, self.state_size)),
         )
 
         # initialize recurrence
