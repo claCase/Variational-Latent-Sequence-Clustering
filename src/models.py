@@ -61,7 +61,7 @@ class DiscreteVariationalMixtureRNN(models.Model):
         hidden_units=15,
         latent_dynamic_units=10,
         latent_global_units=10,
-        activation="tanh",
+        activation="sigmoid",
         recurrent_activation="tanh",
         output_activation="linear",
         clusters=5,
@@ -72,10 +72,16 @@ class DiscreteVariationalMixtureRNN(models.Model):
         temperature=1.0,
         use_sample_kl=True,
         free_runnning_prob=0.5,
+        batch_norm=True,
+        batch_norm_kwargs=dict(), 
+        layer_norm=False,
+        layer_norm_kwargs=dict(),
         **kwargs,
     ):
         super().__init__(**kwargs)
 
+        self.batch_norm = batch_norm
+        self.layer_norm = layer_norm 
         self.latend_dynamic_units = latent_dynamic_units
         self.latend_global_units = latent_global_units
         self.use_kl_sample = use_sample_kl
@@ -91,12 +97,19 @@ class DiscreteVariationalMixtureRNN(models.Model):
             recurrent_activation=recurrent_activation,
             recurrent_dropout=recurrent_dropout,
             dropout=dropout)
+        _cell_args.update({"batch_norm":batch_norm})
+        _cell_args.update(batch_norm_kwargs)
+        _cell_args.update({"layer_norm":layer_norm})
+        _cell_args.update(layer_norm_kwargs)
+
         if rnn_type == "gru":
-            _cell = tfkl.GRUCell
+            _cell = layers.GRUCell
+            _cell_args.pop("recurrent_activation")
         elif rnn_type == "lstm":
-            _cell = tfkl.LSTMCell
+            _cell = layers.LSTMCell
         elif rnn_type == "rnn":
-            _cell = tfkl.SimpleRNNCell
+            _cell = layers.SimpleRNNCell
+            _cell_args.pop("recurrent_activation")
         elif rnn_type == "indrnn" :
             _cell = layers.IndipendentRNNCell
             _cell_args.pop("recurrent_activation")
