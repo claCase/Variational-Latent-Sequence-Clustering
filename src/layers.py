@@ -413,7 +413,7 @@ class SimpleRNNCell(DropoutRNNCellMixin, tf.keras.__internal__.layers.BaseRandom
     ):
         super().__init__(**kwargs)
         self.batch_norm = batch_norm
-        self.layer_norm
+        self.layer_norm = layer_norm
         if batch_norm:
             self.bn_h = layers.BatchNormalization(gamma_initializer=initializers.Constant(gamma), beta_initializer=initializers.Constant(beta))
             self.bn_x = layers.BatchNormalization(gamma_initializer=initializers.Constant(gamma), beta_initializer=initializers.Constant(beta))
