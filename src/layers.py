@@ -99,6 +99,7 @@ class VariationalRecurrenceCell(
         return [zh_prime, z_prime, z_prime_sample], zh_prime
 
 
+@tf.keras.saving.register_keras_serializable(package="Variational")
 class IndipendentRNNCell(
     DropoutRNNCellMixin, tf.keras.__internal__.layers.BaseRandomLayer
 ):
@@ -182,12 +183,12 @@ class IndipendentRNNCell(
         x_h = tf.matmul(inputs, self._input_kernel)
         h_h = tf.multiply(states, self._recurrent_kernel)
         if self.batch_norm:
-            x_h = self.bn_x(x_h)
-            h_h = self.bn_h(h_h)
+            x_h = self.bn_x(x_h, training=training)
+            h_h = self.bn_h(h_h, training=training)
 
         if self.layer_norm:
-            x_h = self.ln_x(x_h)
-            h_h = self.ln_h(h_h)
+            x_h = self.ln_x(x_h, training=training)
+            h_h = self.ln_h(h_h, training=training)
 
         if self.dropout:
             x_h_drop = self.get_dropout_mask_for_cell(x_h, training=training, count=1)
@@ -202,6 +203,7 @@ class IndipendentRNNCell(
         return x, x
 
 
+@tf.keras.saving.register_keras_serializable(package="Variational")
 class GRUCell(DropoutRNNCellMixin, tf.keras.__internal__.layers.BaseRandomLayer):
     def __init__(
         self,
@@ -229,16 +231,12 @@ class GRUCell(DropoutRNNCellMixin, tf.keras.__internal__.layers.BaseRandomLayer)
                 gamma_initializer=initializers.Constant(gamma),
                 beta_initializer=initializers.Constant(beta),
             )
-            self.bn_h_h = layers.BatchNormalization(
-                gamma_initializer=initializers.Constant(gamma),
-                beta_initializer=initializers.Constant(beta),
-            )
         if layer_norm:
             self.ln_h = layers.LayerNormalization(
                 gamma_initializer=initializers.Constant(gamma),
                 beta_initializer=initializers.Constant(beta),
             )
-            self.ln_h_h = layers.LayerNormalization(
+            self.ln_x = layers.LayerNormalization(
                 gamma_initializer=initializers.Constant(gamma),
                 beta_initializer=initializers.Constant(beta),
             )
@@ -295,11 +293,11 @@ class GRUCell(DropoutRNNCellMixin, tf.keras.__internal__.layers.BaseRandomLayer)
         x_ = tf.matmul(inputs, self._input_kernel)
         h_ = tf.matmul(states, self._recurrent_kernel)
         if self.batch_norm:
-            x_ = self.bn_x(x_)
-            h_ = self.bn_h(h_)
+            x_ = self.bn_x(x_, training=training)
+            h_ = self.bn_h(h_, training=training)
         if self.layer_norm:
-            x_ = self.ln_x(x_)
-            h_ = self.ln_h(h_)
+            x_ = self.ln_x(x_, training=training)
+            h_ = self.ln_h(h_, training=training)
         if self.dropout:
             x_drop = self.get_dropout_mask_for_cell(x_, training=training, count=1)
             x_ = x_ * x_drop
@@ -315,15 +313,12 @@ class GRUCell(DropoutRNNCellMixin, tf.keras.__internal__.layers.BaseRandomLayer)
         z = self.z_act(x_z + h_z + z_b)
         r = self.r_act(x_r + h_r + r_b)
         h = self.h_act(x_h + tf.matmul(tf.multiply(r, states), self._gate_kernel) + z_b)
-        if self.batch_norm:
-            h = self.bn_h_h(h)
-        if self.layer_norm:
-            h = self.ln_h(h)
         x = (1 - z) * h + z * h
 
         return x, x
 
 
+@tf.keras.saving.register_keras_serializable(package="Variational")
 class LSTMCell(DropoutRNNCellMixin, tf.keras.__internal__.layers.BaseRandomLayer):
     def __init__(
         self,
@@ -352,20 +347,12 @@ class LSTMCell(DropoutRNNCellMixin, tf.keras.__internal__.layers.BaseRandomLayer
                 gamma_initializer=initializers.Constant(gamma),
                 beta_initializer=initializers.Constant(beta),
             )
-            self.bn_c = layers.BatchNormalization(
-                gamma_initializer=initializers.Constant(gamma),
-                beta_initializer=initializers.Constant(beta),
-            )
         if layer_norm:
             self.ln_h = layers.LayerNormalization(
                 gamma_initializer=initializers.Constant(gamma),
                 beta_initializer=initializers.Constant(beta),
             )
             self.ln_x = layers.LayerNormalization(
-                gamma_initializer=initializers.Constant(gamma),
-                beta_initializer=initializers.Constant(beta),
-            )
-            self.ln_c = layers.LayerNormalization(
                 gamma_initializer=initializers.Constant(gamma),
                 beta_initializer=initializers.Constant(beta),
             )
@@ -419,11 +406,11 @@ class LSTMCell(DropoutRNNCellMixin, tf.keras.__internal__.layers.BaseRandomLayer
         h_ = tf.matmul(states, self._recurrent_kernel)
 
         if self.batch_norm:
-            x_ = self.bn_x(x_)
-            h_ = self.bn_h(h_)
+            x_ = self.bn_x(x_, training=training)
+            h_ = self.bn_h(h_, training=training)
         if self.layer_norm:
-            x_ = self.ln_x(x_)
-            h_ = self.ln_h(h_)
+            x_ = self.ln_x(x_, training=training)
+            h_ = self.ln_h(h_, training=training)
         if self.dropout:
             x_drop = self.get_dropout_mask_for_cell(x_, training=training, count=1)
             x_ = x_ * x_drop
@@ -442,15 +429,12 @@ class LSTMCell(DropoutRNNCellMixin, tf.keras.__internal__.layers.BaseRandomLayer
         o = self.f_act(x_o + h_o + b_o)
         c = self.f_act(x_c + h_c + b_c)
         c_ = tf.multiply(f, states) + tf.multiply(i, c)
-        if self.batch_norm:
-            c_ = self.bn_c(c_)
-        if self.layer_norm:
-            c_ = self.ln_c(c_)
         h = tf.multiply(o, self.h_act(c_))
 
         return h, h
 
 
+@tf.keras.saving.register_keras_serializable(package="Variational")
 class SimpleRNNCell(DropoutRNNCellMixin, tf.keras.__internal__.layers.BaseRandomLayer):
     def __init__(
         self,
@@ -532,12 +516,12 @@ class SimpleRNNCell(DropoutRNNCellMixin, tf.keras.__internal__.layers.BaseRandom
         x_h = tf.matmul(inputs, self._input_kernel)
         h_h = tf.matmul(states, self._recurrent_kernel)
         if self.batch_norm:
-            x_h = self.bn_x(x_h)
-            h_h = self.bn_h(h_h)
+            x_h = self.bn_x(x_h, training=training)
+            h_h = self.bn_h(h_h, training=training)
 
         if self.layer_norm:
-            x_h = self.ln_x(x_h)
-            h_h = self.ln_h(h_h)
+            x_h = self.ln_x(x_h, training=training)
+            h_h = self.ln_h(h_h, training=training)
 
         if self.dropout:
             x_h_drop = self.get_dropout_mask_for_cell(x_h, training=training, count=1)
